@@ -76,7 +76,7 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
                 with st.spinner("Analyzing log sheet with AI..."):
                     try:
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel("gemini-3.8-flash")
+                        model = genai.GenerativeModel("gemini-1.5-pro")
 
                         prompt = """
                         Analyze this image of blood glucose readings, logs, or meter screen. 

@@ -4,7 +4,7 @@ import plotly.express as px
 from PIL import Image
 import streamlit as st
 
-# Optional Google GenAI import for photo parsing
+# Import Google GenAI safely
 try:
     import google.generativeai as genai
 
@@ -51,11 +51,12 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
         "Upload Sheet Photo", type=["jpg", "jpeg", "png"]
     )
 
-    # Allow user to input API key if not set in secrets
+    # Pull API key from secrets or text box input
+    default_key = (
+        st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else ""
+    )
     api_key = st.sidebar.text_input(
-        "Gemini API Key",
-        type="password",
-        value=st.secrets.get("GEMINI_API_KEY", ""),
+        "Gemini API Key", type="password", value=default_key
     )
 
     if uploaded_sheet is not None:
@@ -63,31 +64,28 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
         st.sidebar.image(image, caption="Uploaded Log Sheet", use_column_width=True)
 
         if st.sidebar.button("Extract Readings with AI"):
-            if not AI_AVAILABLE or not api_key:
+            if not AI_AVAILABLE:
                 st.sidebar.error(
-                    "Please provide a Gemini API Key and ensure google-generativeai is installed."
+                    "The Google GenerativeAI library is missing from requirements.txt."
+                )
+            elif not api_key:
+                st.sidebar.error(
+                    "Please enter your Gemini API Key in the box above or via Streamlit Secrets."
                 )
             else:
-                with st.spinner("Analyzing log sheet..."):
+                with st.spinner("Analyzing log sheet with AI..."):
                     try:
                         genai.configure(api_key=api_key)
                         model = genai.GenerativeModel("gemini-1.5-flash")
 
                         prompt = """
-                        Analyze this image of blood glucose readings/logs. Extract all entries and return them strictly as a comma-separated format or list where each entry contains:
-                        Time (HH:MM format), Blood Glucose (mmol/L as a number), Category (Food/Illness/Activity/General), Details, Insulin units (number), Cause/Notes.
-                        If a field is missing, use N/A or 0. Return multiple lines if there are multiple entries.
+                        Analyze this image of blood glucose readings, logs, or meter screen. 
+                        Extract all entries and format them clearly with: Time, Blood Glucose (mmol/L), Category, Details, Insulin units, and Cause/Notes.
                         """
                         response = model.generate_content([prompt, image])
-                        st.sidebar.success(
-                            "Extraction complete! Review text below:"
-                        )
-                        st.sidebar.text_area(
-                            "Extracted Raw Data", response.text, height=150
-                        )
-                        st.sidebar.info(
-                            "Tip: You can use these values to quickly add entries via manual mode."
-                        )
+                        st.sidebar.success("Extraction complete!")
+                        st.sidebar.markdown("### AI Results:")
+                        st.sidebar.write(response.text)
                     except Exception as e:
                         st.sidebar.error(f"Error parsing image: {e}")
 

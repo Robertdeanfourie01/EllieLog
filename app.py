@@ -63,7 +63,7 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
         image = Image.open(uploaded_sheet)
         st.sidebar.image(image, caption="Uploaded Log Sheet", use_column_width=True)
 
-        if st.sidebar.button("Extract Readings with AI"):
+if st.sidebar.button("Extract Readings with AI"):
             if not AI_AVAILABLE:
                 st.sidebar.error(
                     "The Google GenerativeAI library is missing from requirements.txt."
@@ -74,13 +74,20 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
                 with st.spinner("Analyzing log sheet with AI..."):
                     try:
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel("gemini-1.5-flash")
 
-                        prompt = """
-                        Analyze this image of blood glucose readings, logs, or meter screen. 
-                        Extract all entries and format them clearly with: Time, Blood Glucose (mmol/L), Category, Details, Insulin units, and Cause/Notes.
-                        """
-                        response = model.generate_content([prompt, image])
+                        # Try using gemini-pro-vision or general chat-based flash
+                        try:
+                            model = genai.GenerativeModel("gemini-1.5-flash")
+                            prompt = """
+                            Analyze this image of blood glucose readings, logs, or meter screen. 
+                            Extract all entries and format them clearly with: Time, Blood Glucose (mmol/L), Category, Details, Insulin units, and Cause/Notes.
+                            """
+                            response = model.generate_content([prompt, image])
+                        except Exception:
+                            # Fallback to standard text-vision model if flash fails
+                            model = genai.GenerativeModel("gemini-pro-vision")
+                            response = model.generate_content([prompt, image])
+
                         st.sidebar.success("Extraction complete!")
                         st.sidebar.markdown("### AI Results:")
                         st.sidebar.write(response.text)

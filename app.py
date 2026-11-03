@@ -80,8 +80,9 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
                         Analyze this image of blood glucose readings, logs, or meter screen. 
                         Extract all entries and format them clearly with: Time, Blood Glucose (mmol/L), Category, Details, Insulin units, and Cause/Notes.
                         """
+                        # Updated to the required 3.8-flash model for your API tier
                         response = client.models.generate_content(
-                            model="gemini-2.5-flash", contents=[prompt, image]
+                            model="gemini-3.8-flash", contents=[prompt, image]
                         )
                         st.sidebar.success("Extraction complete!")
                         st.sidebar.markdown("### AI Results:")

@@ -4,6 +4,14 @@ import plotly.express as px
 from PIL import Image
 import streamlit as st
 
+# Optional Google GenAI import for photo parsing
+try:
+    import google.generativeai as genai
+
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+
 # Page Configuration
 st.set_page_config(
     page_title="Diabetes 24-Hour Daily Log", page_icon="📈", layout="wide"
@@ -25,54 +33,104 @@ if "log_data" not in st.session_state:
             "Details",
             "Insulin (units)",
             "Cause / Notes",
-            "Snapshot",
         ]
     )
 
-# --- SIDEBAR: DATA ENTRY FORM ---
-st.sidebar.header("📝 Add New Entry")
+# --- SIDEBAR: DATA ENTRY & AI PHOTO PARSER ---
+st.sidebar.header("📝 Add Entries")
 
-with st.sidebar.form("entry_form", clear_on_submit=True):
-    entry_date = st.date_input("Log Date", datetime.today())
-    entry_time = st.time_input("Time", value=time(8, 0))
+entry_mode = st.sidebar.radio(
+    "Input Mode", ["Manual Entry", "🤖 AI Parse from Photo / Sheet"]
+)
 
-    bg_level = st.number_input(
-        "Blood Glucose (mmol/L)", min_value=1.0, max_value=30.0, value=6.0, step=0.1
+if entry_mode == "🤖 AI Parse from Photo / Sheet":
+    st.sidebar.markdown(
+        "Upload a photo of your handwritten log sheet or meter. AI will extract all readings!"
+    )
+    uploaded_sheet = st.sidebar.file_uploader(
+        "Upload Sheet Photo", type=["jpg", "jpeg", "png"]
     )
 
-    category = st.selectbox(
-        "Log Type", ["Food", "Illness", "Activity", "General Log", "Medication"]
+    # Allow user to input API key if not set in secrets
+    api_key = st.sidebar.text_input(
+        "Gemini API Key",
+        type="password",
+        value=st.secrets.get("GEMINI_API_KEY", ""),
     )
 
-    details = st.text_input("Description (e.g., Lunch, Flu symptoms, Walk)")
-    insulin = st.number_input(
-        "Insulin (units)", min_value=0.0, max_value=100.0, value=0.0, step=0.5
-    )
-    cause = st.text_input("Cause / Triggers / Notes")
+    if uploaded_sheet is not None:
+        image = Image.open(uploaded_sheet)
+        st.sidebar.image(image, caption="Uploaded Log Sheet", use_column_width=True)
 
-    # Image upload attachment directly inside the form
-    uploaded_file = st.file_uploader(
-        "Attach Meter Snapshot / Food Photo", type=["jpg", "jpeg", "png"]
-    )
+        if st.sidebar.button("Extract Readings with AI"):
+            if not AI_AVAILABLE or not api_key:
+                st.sidebar.error(
+                    "Please provide a Gemini API Key and ensure google-generativeai is installed."
+                )
+            else:
+                with st.spinner("Analyzing log sheet..."):
+                    try:
+                        genai.configure(api_key=api_key)
+                        model = genai.GenerativeModel("gemini-1.5-flash")
 
-    submitted = st.form_submit_button("Add Entry")
+                        prompt = """
+                        Analyze this image of blood glucose readings/logs. Extract all entries and return them strictly as a comma-separated format or list where each entry contains:
+                        Time (HH:MM format), Blood Glucose (mmol/L as a number), Category (Food/Illness/Activity/General), Details, Insulin units (number), Cause/Notes.
+                        If a field is missing, use N/A or 0. Return multiple lines if there are multiple entries.
+                        """
+                        response = model.generate_content([prompt, image])
+                        st.sidebar.success(
+                            "Extraction complete! Review text below:"
+                        )
+                        st.sidebar.text_area(
+                            "Extracted Raw Data", response.text, height=150
+                        )
+                        st.sidebar.info(
+                            "Tip: You can use these values to quickly add entries via manual mode."
+                        )
+                    except Exception as e:
+                        st.sidebar.error(f"Error parsing image: {e}")
 
-    if submitted:
-        photo_name = uploaded_file.name if uploaded_file else "None"
-        new_row = {
-            "Date": entry_date,
-            "Time": entry_time.strftime("%H:%M"),
-            "Blood Glucose (mmol/L)": bg_level,
-            "Category": category,
-            "Details": details,
-            "Insulin (units)": insulin,
-            "Cause / Notes": cause,
-            "Snapshot": photo_name,
-        }
-        st.session_state.log_data = pd.concat(
-            [st.session_state.log_data, pd.DataFrame([new_row])]
-        ).reset_index(drop=True)
-        st.sidebar.success("Entry added successfully!")
+else:
+    with st.sidebar.form("entry_form", clear_on_submit=True):
+        entry_date = st.date_input("Log Date", datetime.today())
+        entry_time = st.time_input("Time", value=time(8, 0))
+
+        bg_level = st.number_input(
+            "Blood Glucose (mmol/L)",
+            min_value=1.0,
+            max_value=30.0,
+            value=6.0,
+            step=0.1,
+        )
+
+        category = st.selectbox(
+            "Log Type",
+            ["Food", "Illness", "Activity", "General Log", "Medication"],
+        )
+
+        details = st.text_input("Description (e.g., Lunch, Walk)")
+        insulin = st.number_input(
+            "Insulin (units)", min_value=0.0, max_value=100.0, value=0.0, step=0.5
+        )
+        cause = st.text_input("Cause / Triggers / Notes")
+
+        submitted = st.form_submit_button("Add Entry")
+
+        if submitted:
+            new_row = {
+                "Date": entry_date,
+                "Time": entry_time.strftime("%H:%M"),
+                "Blood Glucose (mmol/L)": bg_level,
+                "Category": category,
+                "Details": details,
+                "Insulin (units)": insulin,
+                "Cause / Notes": cause,
+            }
+            st.session_state.log_data = pd.concat(
+                [st.session_state.log_data, pd.DataFrame([new_row])]
+            ).reset_index(drop=True)
+            st.sidebar.success("Entry added successfully!")
 
 # --- MAIN DASHBOARD ---
 df = st.session_state.log_data
@@ -149,7 +207,6 @@ if not df.empty:
                 "Details",
                 "Insulin (units)",
                 "Cause / Notes",
-                "Snapshot",
             ],
             labels={
                 "DateTime": "Time of Day",
@@ -196,7 +253,6 @@ if not df.empty:
                     "Details",
                     "Insulin (units)",
                     "Cause / Notes",
-                    "Snapshot",
                 ]
             ],
             use_container_width=True,
@@ -216,5 +272,5 @@ if not df.empty:
 
 else:
     st.info(
-        "👈 Get started by adding your first entry using the sidebar form on the left."
+        "👈 Get started by adding entries or scanning a sheet via the sidebar."
     )

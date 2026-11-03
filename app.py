@@ -1,17 +1,8 @@
 from datetime import datetime, time, timedelta
-import os
 import pandas as pd
 import plotly.express as px
+from PIL import Image
 import streamlit as st
-
-# Optional: try importing PIL and pytesseract for image reading if installed
-try:
-    from PIL import Image
-    import pytesseract
-
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
 
 # Page Configuration
 st.set_page_config(
@@ -34,73 +25,40 @@ if "log_data" not in st.session_state:
             "Details",
             "Insulin (units)",
             "Cause / Notes",
+            "Snapshot",
         ]
     )
 
-# --- SIDEBAR: DATA ENTRY METHODS ---
+# --- SIDEBAR: DATA ENTRY FORM ---
 st.sidebar.header("📝 Add New Entry")
-entry_mode = st.sidebar.radio(
-    "Choose Input Method", ["Manual Entry", "Upload Photo / Meter Snapshot"]
-)
 
-# Defaults
-default_bg = 6.0
-extracted_notes = ""
-
-if entry_mode == "Upload Photo / Meter Snapshot":
-    st.sidebar.markdown(
-        "Upload a photo of your glucose meter, food, or handwritten notes."
-    )
-    uploaded_file = st.sidebar.file_uploader(
-        "Choose an image...", type=["jpg", "jpeg", "png"]
-    )
-
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.sidebar.image(
-            image, caption="Uploaded Snapshot", use_column_width=True
-        )
-
-        if OCR_AVAILABLE:
-            try:
-                extracted_text = pytesseract.image_to_string(image)
-                extracted_notes = f"OCR Extracted: {extracted_text.strip()[:100]}"
-                st.sidebar.success("Text extracted successfully from photo!")
-            except Exception as e:
-                extracted_notes = "Photo uploaded (OCR engine error)."
-        else:
-            extracted_notes = (
-                "Photo uploaded (Install pytesseract for auto-reading text)."
-            )
-
-# Form for entry
 with st.sidebar.form("entry_form", clear_on_submit=True):
     entry_date = st.date_input("Log Date", datetime.today())
     entry_time = st.time_input("Time", value=time(8, 0))
 
     bg_level = st.number_input(
-        "Blood Glucose (mmol/L)",
-        min_value=1.0,
-        max_value=30.0,
-        value=default_bg,
-        step=0.1,
+        "Blood Glucose (mmol/L)", min_value=1.0, max_value=30.0, value=6.0, step=0.1
     )
 
     category = st.selectbox(
         "Log Type", ["Food", "Illness", "Activity", "General Log", "Medication"]
     )
 
-    details = st.text_input(
-        "Description (e.g., Lunch, Flu symptoms, Walk)", value=""
-    )
+    details = st.text_input("Description (e.g., Lunch, Flu symptoms, Walk)")
     insulin = st.number_input(
         "Insulin (units)", min_value=0.0, max_value=100.0, value=0.0, step=0.5
     )
-    cause = st.text_input("Cause / Triggers / Notes", value=extracted_notes)
+    cause = st.text_input("Cause / Triggers / Notes")
+
+    # Image upload attachment directly inside the form
+    uploaded_file = st.file_uploader(
+        "Attach Meter Snapshot / Food Photo", type=["jpg", "jpeg", "png"]
+    )
 
     submitted = st.form_submit_button("Add Entry")
 
     if submitted:
+        photo_name = uploaded_file.name if uploaded_file else "None"
         new_row = {
             "Date": entry_date,
             "Time": entry_time.strftime("%H:%M"),
@@ -109,6 +67,7 @@ with st.sidebar.form("entry_form", clear_on_submit=True):
             "Details": details,
             "Insulin (units)": insulin,
             "Cause / Notes": cause,
+            "Snapshot": photo_name,
         }
         st.session_state.log_data = pd.concat(
             [st.session_state.log_data, pd.DataFrame([new_row])]
@@ -190,6 +149,7 @@ if not df.empty:
                 "Details",
                 "Insulin (units)",
                 "Cause / Notes",
+                "Snapshot",
             ],
             labels={
                 "DateTime": "Time of Day",
@@ -236,6 +196,7 @@ if not df.empty:
                     "Details",
                     "Insulin (units)",
                     "Cause / Notes",
+                    "Snapshot",
                 ]
             ],
             use_container_width=True,

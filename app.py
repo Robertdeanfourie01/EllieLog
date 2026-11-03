@@ -3,11 +3,12 @@ import pandas as pd
 import plotly.express as px
 from PIL import Image
 import streamlit as st
+import json
+import re
 
 # Import the modern Google GenAI SDK safely
 try:
     from google import genai
-
     AI_AVAILABLE = True
 except ImportError:
     AI_AVAILABLE = False
@@ -45,13 +46,12 @@ entry_mode = st.sidebar.radio(
 
 if entry_mode == "🤖 AI Parse from Photo / Sheet":
     st.sidebar.markdown(
-        "Upload a photo of your handwritten log sheet or meter. AI will extract all readings!"
+        "Upload a photo of your handwritten log sheet or meter. AI will extract all readings and update the graph!"
     )
     uploaded_sheet = st.sidebar.file_uploader(
         "Upload Sheet Photo", type=["jpg", "jpeg", "png", "heic"]
     )
 
-    # Pull API key from secrets or text box input
     default_key = (
         st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else ""
     )
@@ -63,30 +63,53 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
         image = Image.open(uploaded_sheet)
         st.sidebar.image(image, caption="Uploaded Log Sheet", use_column_width=True)
 
-        if st.sidebar.button("Extract Readings with AI"):
+        if st.sidebar.button("Extract & Add to Dashboard"):
             if not AI_AVAILABLE:
-                st.sidebar.error(
-                    "The google-genai library is missing from requirements.txt."
-                )
+                st.sidebar.error("The google-genai library is missing from requirements.txt.")
             elif not api_key:
                 st.sidebar.error("Please enter your Gemini API Key.")
             else:
-                with st.spinner("Analyzing log sheet with AI..."):
+                with st.spinner("Analyzing log sheet and updating dashboard..."):
                     try:
-                        # Initialize client with modern google-genai SDK
                         client = genai.Client(api_key=api_key)
 
                         prompt = """
-                        Analyze this image of blood glucose readings, logs, or meter screen. 
-                        Extract all entries and format them clearly with: Time, Blood Glucose (mmol/L), Category, Details, Insulin units, and Cause/Notes.
+                        Analyze this image of blood glucose readings. Extract all entries and output them strictly as a JSON array of objects.
+                        Use EXACTLY these keys for each object:
+                        "Date" (format YYYY-MM-DD, infer from the page if written, else use today),
+                        "Time" (format HH:MM),
+                        "Blood Glucose (mmol/L)" (float number),
+                        "Category" (string, choose from: Food, Illness, Activity, General Log, Medication),
+                        "Details" (string, what was eaten/done),
+                        "Insulin (units)" (float number, 0.0 if none),
+                        "Cause / Notes" (string)
+                        
+                        Return ONLY the raw JSON array. Do not include markdown formatting, backticks, or any conversational text.
                         """
-                        # Updated to the required 3.8-flash model for your API tier
                         response = client.models.generate_content(
                             model="gemini-3.8-flash", contents=[prompt, image]
                         )
-                        st.sidebar.success("Extraction complete!")
-                        st.sidebar.markdown("### AI Results:")
-                        st.sidebar.write(response.text)
+                        
+                        # Parse the JSON and inject it into the app's dataframe
+                        match = re.search(r'\[.*\]', response.text, re.DOTALL)
+                        if match:
+                            extracted_data = json.loads(match.group())
+                            new_df = pd.DataFrame(extracted_data)
+                            
+                            # Ensure numeric columns are properly formatted
+                            new_df["Blood Glucose (mmol/L)"] = pd.to_numeric(new_df["Blood Glucose (mmol/L)"], errors='coerce').fillna(0.0)
+                            new_df["Insulin (units)"] = pd.to_numeric(new_df["Insulin (units)"], errors='coerce').fillna(0.0)
+                            
+                            st.session_state.log_data = pd.concat(
+                                [st.session_state.log_data, new_df]
+                            ).reset_index(drop=True)
+                            
+                            st.sidebar.success(f"Successfully added {len(extracted_data)} entries!")
+                            st.rerun() # Refreshes the app instantly to show data
+                        else:
+                            st.sidebar.error("Could not format AI data into dashboard. Raw output:")
+                            st.sidebar.write(response.text)
+
                     except Exception as e:
                         st.sidebar.error(f"An error occurred: {str(e)}")
 
@@ -96,18 +119,11 @@ else:
         entry_time = st.time_input("Time", value=time(8, 0))
 
         bg_level = st.number_input(
-            "Blood Glucose (mmol/L)",
-            min_value=1.0,
-            max_value=30.0,
-            value=6.0,
-            step=0.1,
+            "Blood Glucose (mmol/L)", min_value=1.0, max_value=30.0, value=6.0, step=0.1
         )
-
         category = st.selectbox(
-            "Log Type",
-            ["Food", "Illness", "Activity", "General Log", "Medication"],
+            "Log Type", ["Food", "Illness", "Activity", "General Log", "Medication"]
         )
-
         details = st.text_input("Description (e.g., Lunch, Walk)")
         insulin = st.number_input(
             "Insulin (units)", min_value=0.0, max_value=100.0, value=0.0, step=0.5
@@ -118,7 +134,7 @@ else:
 
         if submitted:
             new_row = {
-                "Date": entry_date,
+                "Date": entry_date.strftime("%Y-%m-%d"),
                 "Time": entry_time.strftime("%H:%M"),
                 "Blood Glucose (mmol/L)": bg_level,
                 "Category": category,
@@ -136,9 +152,9 @@ df = st.session_state.log_data
 
 if not df.empty:
     df["DateTime"] = pd.to_datetime(
-        df["Date"].astype(str) + " " + df["Time"].astype(str)
+        df["Date"].astype(str) + " " + df["Time"].astype(str), errors='coerce'
     )
-    df = df.sort_values("DateTime").reset_index(drop=True)
+    df = df.dropna(subset=['DateTime']).sort_values("DateTime").reset_index(drop=True)
 
     st.subheader("📊 24-Hour Cycle Filter")
     unique_dates = df["Date"].unique()
@@ -176,7 +192,6 @@ if not df.empty:
         # --- GRAPHING ---
         st.subheader("📈 Blood Glucose Trend & High/Low Thresholds")
 
-
         def get_status(bg):
             if bg > 10:
                 return "High (> 10)"
@@ -185,10 +200,7 @@ if not df.empty:
             else:
                 return "Target Range (5 - 10)"
 
-
-        cycle_df["Status"] = cycle_df["Blood Glucose (mmol/L)"].apply(
-            get_status
-        )
+        cycle_df["Status"] = cycle_df["Blood Glucose (mmol/L)"].apply(get_status)
 
         fig = px.scatter(
             cycle_df,
@@ -256,7 +268,6 @@ if not df.empty:
             ],
             use_container_width=True,
         )
-
     else:
         st.info("No log entries found within this 24-hour cycle window.")
 
@@ -270,6 +281,4 @@ if not df.empty:
         st.success("Downloaded successfully!")
 
 else:
-    st.info(
-        "👈 Get started by adding entries or scanning a sheet via the sidebar."
-    )
+    st.info("👈 Get started by adding entries or scanning a sheet via the sidebar.")

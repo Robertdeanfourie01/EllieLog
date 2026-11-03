@@ -4,7 +4,7 @@ import plotly.express as px
 from PIL import Image
 import streamlit as st
 
-# Import Google GenAI safely
+# Optional Google GenAI import for photo parsing
 try:
     import google.generativeai as genai
 
@@ -48,7 +48,7 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
         "Upload a photo of your handwritten log sheet or meter. AI will extract all readings!"
     )
     uploaded_sheet = st.sidebar.file_uploader(
-        "Upload Sheet Photo", type=["jpg", "jpeg", "png"]
+        "Upload Sheet Photo", type=["jpg", "jpeg", "png", "heic"]
     )
 
     # Pull API key from secrets or text box input
@@ -69,14 +69,12 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
                     "The Google GenerativeAI library is missing from requirements.txt."
                 )
             elif not api_key:
-                st.sidebar.error(
-                    "Please enter your Gemini API Key in the box above or via Streamlit Secrets."
-                )
+                st.sidebar.error("Please enter your Gemini API Key.")
             else:
                 with st.spinner("Analyzing log sheet with AI..."):
                     try:
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel("gemini-3.8-flash")
+                        model = genai.GenerativeModel("gemini-1.5-flash")
 
                         prompt = """
                         Analyze this image of blood glucose readings, logs, or meter screen. 
@@ -87,7 +85,7 @@ if entry_mode == "🤖 AI Parse from Photo / Sheet":
                         st.sidebar.markdown("### AI Results:")
                         st.sidebar.write(response.text)
                     except Exception as e:
-                        st.sidebar.error(f"Error parsing image: {e}")
+                        st.sidebar.error(f"An error occurred: {str(e)}")
 
 else:
     with st.sidebar.form("entry_form", clear_on_submit=True):
